@@ -3,7 +3,16 @@ package main
 import (
 	"net/http"
 
-	"github.com/petuhovskiy/go-template/pkg/conf"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/credentials"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/rwlist/coub/pkg/coub"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+
+	"github.com/rwlist/coub/pkg/conf"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -22,11 +31,54 @@ func main() {
 	go func() {
 		mux := http.NewServeMux()
 		mux.Handle("/metrics", promhttp.Handler())
-		err := http.ListenAndServe(cfg.PrometheusBind, mux)
+		err := http.ListenAndServe(cfg.PrometheusBind, mux) //nolint:govet
 		if err != nil && err != http.ErrServerClosed {
 			log.WithError(err).Fatal("prometheus server error")
 		}
 	}()
 
-	select {}
+	db, err := gorm.Open(postgres.Open(cfg.PostgresDSN), &gorm.Config{})
+	if err != nil {
+		log.WithError(err).Fatal("failed to connect to postgres")
+	}
+	db = db.Debug()
+
+	cookies := coub.NewCookies(db)
+	err = cookies.AutoMigrate()
+	if err != nil {
+		log.WithError(err).Fatal("failed to migrate kv table")
+	}
+
+	c, err := cookies.Get()
+	spew.Dump(c, err)
+
+	cli := coub.NewClient(cookies)
+
+	// Configure to use MinIO Server
+	s3Config := &aws.Config{
+		Credentials:      credentials.NewStaticCredentials(cfg.S3AccessKey, cfg.S3SecretKey, ""),
+		Endpoint:         aws.String(cfg.S3Endpoint),
+		Region:           aws.String(cfg.S3Region),
+		DisableSSL:       aws.Bool(false),
+		S3ForcePathStyle: aws.Bool(true),
+	}
+	newSession, err := session.NewSession(s3Config)
+	if err != nil {
+		log.WithError(err).Fatal("failed to create new session")
+	}
+
+	s3Client := s3.New(newSession)
+
+	downloader := coub.NewDownloader(cli, s3Client, db, cfg)
+	err = downloader.AutoMigrate()
+	if err != nil {
+		log.WithError(err).Fatal("failed to migrate downloader table")
+	}
+
+	err = downloader.DownloadProfile(cfg.CoubUsername)
+	if err != nil {
+		log.WithError(err).Fatal("failed to download profile")
+	}
+
+	log.Info("done")
 }

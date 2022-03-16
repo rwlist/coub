@@ -1,9 +1,10 @@
 version: "3.7"
 services:
-  app:
-    build: .
+  db:
+    image: postgres:14-alpine
     ports:
-      - 8080:8080
-    env_file:
-      - .env
-    restart: unless-stopped
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
