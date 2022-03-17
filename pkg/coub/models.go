@@ -107,7 +107,6 @@ type Coub struct {
 	RemixesCount         int           `json:"remixes_count"`
 	LikesCount           int           `json:"likes_count"`
 	DislikesCount        int           `json:"dislikes_count"`
-	RawVideoID           int           `json:"raw_video_id"`
 	RawVideoThumbnailURL string        `json:"raw_video_thumbnail_url"`
 	RawVideoTitle        string        `json:"raw_video_title"`
 	Duration             float64       `json:"duration"`

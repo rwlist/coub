@@ -1,7 +1,9 @@
 package main
 
 import (
+	"math/rand"
 	"net/http"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -19,6 +21,8 @@ import (
 )
 
 func main() {
+	rand.Seed(time.Now().UnixNano())
+
 	log.SetFormatter(&log.JSONFormatter{})
 	log.SetReportCaller(true)
 	log.SetLevel(log.DebugLevel)
@@ -75,10 +79,18 @@ func main() {
 		log.WithError(err).Fatal("failed to migrate downloader table")
 	}
 
-	err = downloader.DownloadProfile(cfg.CoubUsername)
-	if err != nil {
-		log.WithError(err).Fatal("failed to download profile")
-	}
+	//err = downloader.DownloadProfile(cfg.CoubUsername)
+	//if err != nil {
+	//	log.WithError(err).Fatal("failed to download profile")
+	//}
+	//
+	//log.Info("done")
 
-	log.Info("done")
+	server := coub.NewServer(s3Client, db, cfg)
+
+	r := server.Router()
+	err = http.ListenAndServe(cfg.BindHTTP, r)
+	if err != nil {
+		log.WithError(err).Fatal("http server error")
+	}
 }

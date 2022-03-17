@@ -13,6 +13,7 @@ type App struct {
 	S3SecretKey    string `env:"S3_SECRET_ACCESS_KEY"`
 	S3Bucket       string `env:"S3_BUCKET"`
 	CoubUsername   string `env:"COUB_USERNAME"`
+	BindHTTP       string `env:"BIND_HTTP" envDefault:":8080"`
 }
 
 func ParseEnv() (*App, error) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"io"
 	"net/http"
 	"time"
@@ -21,6 +22,7 @@ type ProfileCoub struct {
 	CoubID      int       `gorm:"not null"`
 	PublishedAt time.Time `gorm:"not null"`
 	Info        []byte    `gorm:"type:jsonb;not null"`
+	NoAudio     bool
 }
 
 type Downloader struct {
@@ -59,6 +61,7 @@ func (d *Downloader) DownloadProfile(profile string) error {
 			var coub Coub
 			err := json.Unmarshal(rawCoub, &coub)
 			if err != nil {
+				spew.Dump(rawCoub)
 				return err
 			}
 
@@ -72,8 +75,9 @@ func (d *Downloader) DownloadProfile(profile string) error {
 				continue
 			}
 
-			err = d.downloadCoub(&coub)
+			noAudio, err := d.downloadCoub(&coub)
 			if err != nil {
+				spew.Dump(coub)
 				return err
 			}
 
@@ -81,6 +85,7 @@ func (d *Downloader) DownloadProfile(profile string) error {
 				CoubID:      coub.ID,
 				PublishedAt: coub.PublishedAt,
 				Info:        rawCoub,
+				NoAudio:     noAudio,
 			}).Error; err != nil {
 				return err
 			}
@@ -95,31 +100,30 @@ func (d *Downloader) DownloadProfile(profile string) error {
 	return nil
 }
 
-func (d *Downloader) downloadCoub(coub *Coub) error {
+func (d *Downloader) downloadCoub(coub *Coub) (noAudio bool, err error) {
 	log.WithField("coub_id", coub.ID).Info("Downloading coub")
 
 	videoURL, err := bestURL(coub.FileVersions.HTML5.Video)
 	if err != nil {
-		return err
+		return false, err
+	}
+	videoKey := fmt.Sprintf("%d_video.mp4", coub.ID)
+	if err := d.upload(videoURL, videoKey); err != nil {
+		return false, err
 	}
 
 	audioURL, err := bestURL(coub.FileVersions.HTML5.Audio)
 	if err != nil {
-		return err
+		noAudio = true
+		log.WithField("coub_id", coub.ID).Info("coub has no audio")
+	} else {
+		audioKey := fmt.Sprintf("%d_audio.mp3", coub.ID)
+		if err := d.upload(audioURL, audioKey); err != nil {
+			return false, err
+		}
 	}
 
-	videoKey := fmt.Sprintf("%d_video.mp4", coub.ID)
-	audioKey := fmt.Sprintf("%d_audio.mp3", coub.ID)
-
-	if err := d.upload(videoURL, videoKey); err != nil {
-		return err
-	}
-
-	if err := d.upload(audioURL, audioKey); err != nil {
-		return err
-	}
-
-	return nil
+	return noAudio, nil
 }
 
 func (d *Downloader) upload(url, key string) error {

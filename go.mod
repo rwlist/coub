@@ -6,6 +6,7 @@ require (
 	github.com/aws/aws-sdk-go v1.43.19
 	github.com/caarlos0/env/v6 v6.6.0
 	github.com/davecgh/go-spew v1.1.1
+	github.com/go-chi/chi/v5 v5.0.7 // indirect
 	github.com/jackc/pgx/v4 v4.15.0 // indirect
 	github.com/prometheus/client_golang v1.10.0
 	github.com/sirupsen/logrus v1.8.1
