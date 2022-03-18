@@ -1,4 +1,4 @@
-package coub
+package local
 
 import (
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"path/filepath"
+	"strings"
 )
 
 type Server struct {
@@ -25,6 +26,15 @@ func NewServer(s3 *s3.S3, db *gorm.DB, cfg *conf.App) *Server {
 		db:  db,
 		cfg: cfg,
 	}
+}
+
+func (s *Server) Router() *chi.Mux {
+	r := chi.NewRouter()
+	r.Get("/file/{filename}", s.handleFile)
+	r.Get("/profile", s.handleProfile)
+	r.Get("/profile/{index:[0-9]+}", s.handleProfile)
+	r.Get("/profile_{filter}/{index:[0-9]+}", s.handleProfile)
+	return r
 }
 
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
@@ -49,13 +59,20 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	filter := s.db.Model(&ProfileCoub{})
+
+	filterParam := chi.URLParam(r, "filter")
+	if filterParam != "" {
+		filter = filter.Where("profile = ?", filterParam)
+	}
+
 	var allCount int64
-	if err := s.db.Model(&ProfileCoub{}).Count(&allCount).Error; err != nil {
+	if err := filter.Count(&allCount).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	numberRaw := filepath.Base(r.URL.Path)
+	numberRaw := chi.URLParam(r, "index")
 	var number int
 	if _, err := fmt.Sscanf(numberRaw, "%d", &number); err != nil {
 		// take a random coub
@@ -63,7 +80,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var profileCoub ProfileCoub
-	err := s.db.Limit(1).Offset(number).Find(&profileCoub).Error
+	err := filter.Order("published_at ASC").Limit(1).Offset(number).Find(&profileCoub).Error
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -78,6 +95,12 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		next = 0
 	}
 	random := rand.Intn(int(allCount))
+
+	cleanURL := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	urlFirstElem := "profile"
+	if len(cleanURL) > 0 {
+		urlFirstElem = cleanURL[0]
+	}
 
 	w.Header().Set("Content-Type", "text/html")
 	_, _ = fmt.Fprintf(w, `<!DOCTYPE html>
@@ -115,9 +138,9 @@ function handleFirstPlay(event) {
 <br/>
 <audio preload="auto" controls loop="loop" src="/file/%v_audio.mp3"></audio>
 <p>
-<a href="/profile/%v">Prev</a>
-<a href="/profile/%v">Random</a>
-<a href="/profile/%v">Next</a>
+<a href="/%v/%v">Prev</a>
+<a href="/%v/%v">Random</a>
+<a href="/%v/%v">Next</a>
 </p>
 </center>
 </body>
@@ -126,15 +149,11 @@ function handleFirstPlay(event) {
 		number,
 		profileCoub.CoubID,
 		profileCoub.CoubID,
+		urlFirstElem,
 		prev,
+		urlFirstElem,
 		random,
+		urlFirstElem,
 		next,
 	)
-}
-
-func (s *Server) Router() *chi.Mux {
-	r := chi.NewRouter()
-	r.Get("/file/*", s.handleFile)
-	r.Get("/profile/*", s.handleProfile)
-	return r
 }

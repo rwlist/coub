@@ -1,6 +1,8 @@
 package main
 
 import (
+	"github.com/rwlist/coub/pkg/coubs"
+	"github.com/rwlist/coub/pkg/local"
 	"math/rand"
 	"net/http"
 	"time"
@@ -10,7 +12,6 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/rwlist/coub/pkg/coub"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
@@ -47,7 +48,12 @@ func main() {
 	}
 	db = db.Debug()
 
-	cookies := coub.NewCookies(db)
+	err = local.AutoMigrate(db)
+	if err != nil {
+		log.WithError(err).Fatal("failed to migrate tables")
+	}
+
+	cookies := coubs.NewCookies(db)
 	err = cookies.AutoMigrate()
 	if err != nil {
 		log.WithError(err).Fatal("failed to migrate kv table")
@@ -55,8 +61,6 @@ func main() {
 
 	c, err := cookies.Get()
 	spew.Dump(c, err)
-
-	cli := coub.NewClient(cookies)
 
 	// Configure to use MinIO Server
 	s3Config := &aws.Config{
@@ -73,21 +77,22 @@ func main() {
 
 	s3Client := s3.New(newSession)
 
-	downloader := coub.NewDownloader(cli, s3Client, db, cfg)
-	err = downloader.AutoMigrate()
-	if err != nil {
-		log.WithError(err).Fatal("failed to migrate downloader table")
+	const enableBackup = false
+
+	cli := coubs.NewClient(cookies)
+	downloader := local.NewDownloader(cli, s3Client, db, cfg)
+	backup := local.NewBackup(downloader, cli, db)
+
+	if enableBackup {
+		err = backup.Profile(cfg.CoubUsername)
+		if err != nil {
+			log.WithError(err).Fatal("failed to download profile")
+		}
 	}
 
-	//err = downloader.DownloadProfile(cfg.CoubUsername)
-	//if err != nil {
-	//	log.WithError(err).Fatal("failed to download profile")
-	//}
-	//
-	//log.Info("done")
+	log.Info("done")
 
-	server := coub.NewServer(s3Client, db, cfg)
-
+	server := local.NewServer(s3Client, db, cfg)
 	r := server.Router()
 	err = http.ListenAndServe(cfg.BindHTTP, r)
 	if err != nil {

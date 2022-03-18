@@ -1,4 +1,4 @@
-package coub
+package coubs
 
 import (
 	"encoding/json"
