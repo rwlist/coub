@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/davecgh/go-spew/spew"
@@ -12,8 +15,6 @@ import (
 	"github.com/rwlist/coub/pkg/coubs"
 	log "github.com/sirupsen/logrus"
 	"gorm.io/gorm"
-	"io"
-	"net/http"
 )
 
 type Downloader struct {
@@ -57,7 +58,8 @@ func (d *Downloader) DownloadCoub(rawCoub []byte) error {
 		return err
 	}
 	videoKey := fmt.Sprintf("%d_video.mp4", coub.ID)
-	if err := d.upload(videoURL, videoKey); err != nil {
+	err = d.upload(videoURL, videoKey)
+	if err != nil {
 		return err
 	}
 

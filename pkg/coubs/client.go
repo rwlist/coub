@@ -33,7 +33,57 @@ func (c *Client) ChannelTimeline(name string, page int) (*PageResponse, error) {
 		return nil, err
 	}
 
-	req.Method = "GET"
+	req.Method = http.MethodGet
+	req.URL = requestURL
+	req.RequestURI = ""
+	req.Header.Del("Accept-Encoding")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	err = c.cookies.Update(req, resp)
+	if err != nil {
+		return nil, err
+	}
+
+	var body []byte
+	body, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var pageResponse PageResponse
+	err = json.Unmarshal(body, &pageResponse)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pageResponse, nil
+}
+
+func (c *Client) Likes(page int) (*PageResponse, error) {
+	// https://coub.com/api/v2/timeline/likes?all=true&order_by=date&page=1
+
+	st, err := c.cookies.Get()
+	if err != nil {
+		return nil, err
+	}
+	req := st.Request
+
+	requestURL, err := url.Parse(
+		fmt.Sprintf(
+			"https://coub.com/api/v2/timeline/likes?all=true&order_by=date&page=%d",
+			page,
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Method = http.MethodGet
 	req.URL = requestURL
 	req.RequestURI = ""
 	req.Header.Del("Accept-Encoding")

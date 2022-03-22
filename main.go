@@ -1,11 +1,12 @@
 package main
 
 import (
-	"github.com/rwlist/coub/pkg/coubs"
-	"github.com/rwlist/coub/pkg/local"
 	"math/rand"
 	"net/http"
 	"time"
+
+	"github.com/rwlist/coub/pkg/coubs"
+	"github.com/rwlist/coub/pkg/local"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -77,22 +78,26 @@ func main() {
 
 	s3Client := s3.New(newSession)
 
-	const enableBackup = false
-
+	state := local.NewSharedState()
 	cli := coubs.NewClient(cookies)
 	downloader := local.NewDownloader(cli, s3Client, db, cfg)
-	backup := local.NewBackup(downloader, cli, db)
+	backup := local.NewBackup(downloader, cli, db, state)
 
-	if enableBackup {
-		err = backup.Profile(cfg.CoubUsername)
-		if err != nil {
-			log.WithError(err).Fatal("failed to download profile")
-		}
+	if cfg.EnableBackup {
+		go func() {
+			usernames := cfg.BackupProfiles
+
+			for _, username := range usernames {
+				log.WithField("username", username).Info("backup started")
+				err = backup.Profile(username)
+				if err != nil {
+					log.WithError(err).Fatal("failed to download profile")
+				}
+			}
+		}()
 	}
 
-	log.Info("done")
-
-	server := local.NewServer(s3Client, db, cfg)
+	server := local.NewServer(s3Client, db, cfg, state)
 	r := server.Router()
 	err = http.ListenAndServe(cfg.BindHTTP, r)
 	if err != nil {

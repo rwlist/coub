@@ -1,40 +1,58 @@
+//nolint:dupl
 package local
 
 import (
 	"fmt"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/service/s3"
-	"github.com/go-chi/chi/v5"
-	"github.com/rwlist/coub/pkg/conf"
-	"gorm.io/gorm"
 	"io"
 	"math/rand"
 	"net/http"
 	"path/filepath"
 	"strings"
+
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/go-chi/chi/v5"
+	"github.com/rwlist/coub/pkg/conf"
+	"gorm.io/gorm"
 )
 
 type Server struct {
-	s3  *s3.S3
-	db  *gorm.DB
-	cfg *conf.App
+	s3    *s3.S3
+	db    *gorm.DB
+	cfg   *conf.App
+	state *SharedState
 }
 
-func NewServer(s3 *s3.S3, db *gorm.DB, cfg *conf.App) *Server {
+func NewServer(sss *s3.S3, db *gorm.DB, cfg *conf.App, state *SharedState) *Server {
 	return &Server{
-		s3:  s3,
-		db:  db,
-		cfg: cfg,
+		s3:    sss,
+		db:    db,
+		cfg:   cfg,
+		state: state,
 	}
 }
 
 func (s *Server) Router() *chi.Mux {
 	r := chi.NewRouter()
 	r.Get("/file/{filename}", s.handleFile)
+
 	r.Get("/profile", s.handleProfile)
 	r.Get("/profile/{index:[0-9]+}", s.handleProfile)
 	r.Get("/profile_{filter}/{index:[0-9]+}", s.handleProfile)
+
+	r.Get("/liked", s.handleLiked)
+	r.Get("/liked/{index:[0-9]+}", s.handleLiked)
+	r.Get("/liked{filter}/{index:[0-9]+}", s.handleLiked)
+
+	r.Get("/state", s.handleState)
+
 	return r
+}
+
+func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
+	state := s.state.Get()
+	spew.Fdump(w, state)
 }
 
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +94,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	var number int
 	if _, err := fmt.Sscanf(numberRaw, "%d", &number); err != nil {
 		// take a random coub
-		number = rand.Intn(int(allCount))
+		number = rand.Intn(int(allCount)) //nolint:gosec
 	}
 
 	var profileCoub ProfileCoub
@@ -86,18 +104,73 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	prev := number - 1
-	if prev < 0 {
-		prev = int(allCount) - 1
+	z0rViewer{
+		CoubID:     profileCoub.CoubID,
+		Number:     number,
+		AllCount:   int(allCount),
+		DefaultURL: "profile",
+		Header:     "Profile",
+	}.Render(w, r)
+}
+
+func (s *Server) handleLiked(w http.ResponseWriter, r *http.Request) {
+	filter := s.db.Model(&LikedCoub{})
+
+	filterParam := chi.URLParam(r, "filter")
+	if filterParam != "" {
+		filter = filter.Where("profile = ?", filterParam)
 	}
-	next := number + 1
-	if next >= int(allCount) {
+
+	var allCount int64
+	if err := filter.Count(&allCount).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	numberRaw := chi.URLParam(r, "index")
+	var number int
+	if _, err := fmt.Sscanf(numberRaw, "%d", &number); err != nil {
+		// take a random coub
+		number = rand.Intn(int(allCount)) //nolint:gosec
+	}
+
+	var likedCoub LikedCoub
+	err := filter.Order("id ASC").Limit(1).Offset(number).Find(&likedCoub).Error
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	z0rViewer{
+		CoubID:     likedCoub.CoubID,
+		Number:     number,
+		AllCount:   int(allCount),
+		DefaultURL: "liked",
+		Header:     "Liked",
+	}.Render(w, r)
+}
+
+type z0rViewer struct {
+	CoubID     int
+	Number     int
+	AllCount   int
+	DefaultURL string
+	Header     string
+}
+
+func (z z0rViewer) Render(w http.ResponseWriter, r *http.Request) {
+	prev := z.Number - 1
+	if prev < 0 {
+		prev = z.AllCount - 1
+	}
+	next := z.Number + 1
+	if next >= z.AllCount {
 		next = 0
 	}
-	random := rand.Intn(int(allCount))
+	random := rand.Intn(z.AllCount) //nolint:gosec
 
 	cleanURL := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	urlFirstElem := "profile"
+	urlFirstElem := z.DefaultURL
 	if len(cleanURL) > 0 {
 		urlFirstElem = cleanURL[0]
 	}
@@ -107,7 +180,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 <html>
 <head>
 <meta charset="utf-8">
-<title>Profile #%v</title>
+<title>%s #%v</title>
 </head>
 <body>
 <center>
@@ -146,9 +219,10 @@ function handleFirstPlay(event) {
 </body>
 </html>
 `,
-		number,
-		profileCoub.CoubID,
-		profileCoub.CoubID,
+		z.Header,
+		z.Number,
+		z.CoubID,
+		z.CoubID,
 		urlFirstElem,
 		prev,
 		urlFirstElem,
